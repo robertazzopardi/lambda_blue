@@ -1,0 +1,3 @@
+[submodule "emulators/emulator_chip8"]
+	path = emulators/emulator_chip8
+	url = https://github.com/robertazzopardi/emulator_chip8

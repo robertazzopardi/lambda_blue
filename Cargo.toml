@@ -1,0 +1,9 @@
+[workspace]
+members = ["lambda_blue", "emulators/emulator_chip8"]
+default-members = ["lambda_blue"]
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+opt-level = 3
