@@ -7,3 +7,10 @@ edition = "2021"
 
 [dependencies]
 emulator_chip8 = { path = "../emulators/emulator_chip8" }
+native-dialog = "0.5.5"
+home = "0.5.3"
+
+[dependencies.sdl2]
+version = "0.34"
+default-features = false
+features = ["ttf"]
