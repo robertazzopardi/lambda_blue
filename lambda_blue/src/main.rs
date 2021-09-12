@@ -113,6 +113,7 @@ mod file_system {
 
 mod window {
     extern crate sdl2;
+
     use crate::{emulator::EmulatorAndRom, file_system, text_font::Text, EMULATORS, EXIT_TEXT};
     use sdl2::{
         event::Event,
@@ -139,6 +140,14 @@ mod window {
         };
     }
 
+    macro_rules! render_text_list {
+        ( $list:expr,$canvas:expr) => {
+            $canvas.clear();
+            draw_text_list!($list, $canvas);
+            $canvas.present();
+        };
+    }
+
     pub fn main_window() -> Result<Option<EmulatorAndRom>, String> {
         let sdl_context = sdl2::init()?;
         let ttf_context = sdl2::ttf::init().map_err(|e| e.to_string())?;
@@ -153,7 +162,7 @@ mod window {
 
         let mut canvas = window
             .into_canvas()
-            .present_vsync()
+            // .present_vsync()
             .accelerated()
             .build()
             .map_err(|e| e.to_string())?;
@@ -173,7 +182,13 @@ mod window {
         let mut emulator = String::new();
         let mut rom = String::new();
 
+        render_text_list!(emulator_names, canvas);
+
+        let mut timer = sdl_context.timer()?;
+
         'running: loop {
+            let start = timer.performance_counter();
+
             for event in events.poll_iter() {
                 match event {
                     Event::Quit { .. }
@@ -192,6 +207,12 @@ mod window {
                                         break 'running;
                                     }
                                     emulator = name.text().to_string().clone();
+
+                                    if let Some(names) = &rom_names {
+                                        render_text_list!(names, canvas);
+                                    } else {
+                                        render_text_list!(no_roms_text_vec, canvas);
+                                    }
                                 }
                             }
                         } else {
@@ -201,6 +222,7 @@ mod window {
 
                                     if name.text() == "Back" {
                                         emulator = String::new();
+                                        render_text_list!(emulator_names, canvas);
                                         break;
                                     }
 
@@ -216,17 +238,10 @@ mod window {
                 }
             }
 
-            canvas.clear();
+            let end = timer.performance_counter();
+            let elapsed = (end - start) as f32 / timer.performance_frequency() as f32 * 1000.;
 
-            if emulator.is_empty() {
-                draw_text_list!(emulator_names, canvas);
-            } else if let Some(names) = &rom_names {
-                draw_text_list!(names, canvas);
-            } else {
-                draw_text_list!(no_roms_text_vec, canvas);
-            }
-
-            canvas.present();
+            timer.delay(((1000. / 10.) - elapsed).floor() as u32);
         }
 
         if !emulator.is_empty() && !rom.is_empty() {
