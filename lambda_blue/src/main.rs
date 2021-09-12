@@ -1,6 +1,7 @@
 extern crate emulator_chip8 as chip8;
 
-const EMULATORS: [&str; 2] = [chip8::emulator_driver::NAME, "Exit"];
+const EXIT_TEXT: &str = "Exit";
+const EMULATORS: [&str; 2] = [chip8::emulator_driver::NAME, EXIT_TEXT];
 // const COUNT: usize = EMULATORS.len();
 
 mod text_font {
@@ -84,9 +85,40 @@ mod text_font {
     }
 }
 
-mod window {
-    use crate::{text_font::Text, EMULATORS};
+mod emulator {
+    pub struct EmulatorAndRom {
+        pub emulator: String,
+        pub rom: String,
+    }
+
+    impl EmulatorAndRom {
+        pub fn new(emulator: String, rom: String) -> EmulatorAndRom {
+            EmulatorAndRom { emulator, rom }
+        }
+    }
+}
+
+mod file_system {
     use native_dialog::FileDialog;
+
+    pub fn choose_file() -> Result<String, String> {
+        let home_dir = home::home_dir().unwrap();
+
+        let path = FileDialog::new()
+            .set_location(home_dir.to_str().unwrap())
+            .show_open_single_file()
+            .unwrap();
+
+        let path = match path {
+            Some(it) => it,
+            None => return Err("Something went wrong choosing a rom file!".to_string()),
+        };
+        Ok(path.to_str().unwrap().to_string().replace("file://", ""))
+    }
+}
+
+mod window {
+    use crate::{emulator::EmulatorAndRom, file_system, text_font::Text, EMULATORS, EXIT_TEXT};
     use sdl2::{event::Event, keyboard::Keycode, rect::Point, ttf::Font};
     use std::path::Path;
 
@@ -95,19 +127,15 @@ mod window {
     pub const WIDTH: u32 = 600;
     pub const HEIGHT: u32 = 600;
 
-    pub struct EmulatorAndRom {
-        pub emulator: String,
-        pub rom: String,
-    }
-
-    impl EmulatorAndRom {
-        fn new(emulator: String, rom: String) -> EmulatorAndRom {
-            EmulatorAndRom { emulator, rom }
-        }
+    macro_rules! draw_text_list {
+        ($list:expr, $canvas:expr) => {
+            for text in $list.iter() {
+                $canvas.copy(&text.texture, None, Some(text.target))?;
+            }
+        };
     }
 
     pub fn main_window() -> Result<Option<EmulatorAndRom>, String> {
-        // Result<&'static str, String> {
         let sdl_context = sdl2::init()?;
 
         let window = sdl_context
@@ -141,7 +169,13 @@ mod window {
             })
             .collect();
 
-        let load_rom_text = Text::new("Load Rom", &font, &texture_creator, 0, 0).unwrap();
+        let no_roms_text_vec: Vec<Text> = vec!["Load Rom", "Back"]
+            .iter()
+            .enumerate()
+            .map(|(index, name)| {
+                Text::new(*name, &font, &texture_creator, 0, (index * 80) as u32).unwrap()
+            })
+            .collect();
 
         let rom_names: Option<Vec<Text>> = None;
 
@@ -158,29 +192,32 @@ mod window {
                     } => break 'running,
                     Event::MouseButtonUp { x, y, .. } => {
                         let mouse_pos = Point::new(x, y);
+
                         if emulator.is_empty() {
                             for name in emulator_names.iter() {
                                 if name.target.contains_point(mouse_pos) {
                                     println!("{}", name.text);
-                                    if name.text == "Exit" {
+                                    if name.text == EXIT_TEXT {
                                         break 'running;
                                     }
                                     emulator = name.text.to_string();
                                 }
                             }
-                        } else if load_rom_text.target.contains_point(mouse_pos) {
-                            println!("{} {:?}", load_rom_text.text, home::home_dir());
+                        } else {
+                            for name in no_roms_text_vec.iter() {
+                                if name.target.contains_point(mouse_pos) {
+                                    println!("{} {:?}", name.text, home::home_dir());
 
-                            let home_dir = home::home_dir().unwrap();
+                                    if name.text == "Back" {
+                                        emulator = String::new();
+                                        break;
+                                    }
 
-                            let path = FileDialog::new()
-                                .set_location(home_dir.to_str().unwrap())
-                                .show_open_single_file()
-                                .unwrap();
-
-                            if let Some(path) = path {
-                                rom = path.to_str().unwrap().to_string().replace("file://", "");
-                                break 'running;
+                                    if let Ok(file) = file_system::choose_file() {
+                                        rom = file;
+                                        break 'running;
+                                    }
+                                }
                             }
                         }
                     }
@@ -191,39 +228,38 @@ mod window {
             canvas.clear();
 
             if emulator.is_empty() {
-                for text in emulator_names.iter() {
-                    canvas.copy(&text.texture, None, Some(text.target))?;
-                }
+                draw_text_list!(emulator_names, canvas);
             } else if let Some(names) = &rom_names {
-                for text in names.iter() {
-                    canvas.copy(&text.texture, None, Some(text.target))?;
-                }
+                draw_text_list!(names, canvas);
             } else {
-                canvas.copy(&load_rom_text.texture, None, Some(load_rom_text.target))?;
+                draw_text_list!(no_roms_text_vec, canvas);
             }
 
             canvas.present();
         }
 
-        // Ok(None)
         if !emulator.is_empty() && !rom.is_empty() {
-            Ok(Some(EmulatorAndRom::new(emulator, rom)))
-        } else {
-            Ok(None)
+            return Ok(Some(EmulatorAndRom::new(emulator, rom)));
         }
+        Ok(None)
     }
 }
 
 fn main() -> Result<(), String> {
-    let s = window::main_window();
-    if let Ok(emulator_and_rom) = s {
-        match emulator_and_rom {
-            Some(window::EmulatorAndRom { emulator, rom }) => match emulator.as_str() {
-                chip8::emulator_driver::NAME => chip8::emulator_driver::start(Some(rom.as_str()))?,
-                _ => {}
-            },
-            _ => {
-                println!("Exiting!");
+    'running: loop {
+        let s = window::main_window();
+        if let Ok(emulator_and_rom) = s {
+            match emulator_and_rom {
+                Some(emulator::EmulatorAndRom { emulator, rom }) => match emulator.as_str() {
+                    chip8::emulator_driver::NAME => {
+                        chip8::emulator_driver::start(Some(rom.as_str()))?
+                    }
+                    _ => {}
+                },
+                _ => {
+                    println!("Exiting!");
+                    break 'running;
+                }
             }
         }
     }
