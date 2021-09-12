@@ -208,11 +208,11 @@ mod window {
                                     }
                                     emulator = name.text().to_string().clone();
 
+                                    let mut text_to_render = &no_roms_text_vec;
                                     if let Some(names) = &rom_names {
-                                        render_text_list!(names, canvas);
-                                    } else {
-                                        render_text_list!(no_roms_text_vec, canvas);
+                                        text_to_render = names;
                                     }
+                                    render_text_list!(text_to_render, canvas);
                                 }
                             }
                         } else {
@@ -227,7 +227,7 @@ mod window {
                                     }
 
                                     if let Ok(file_name) = file_system::choose_file() {
-                                        rom = file_name.clone();
+                                        rom = file_name;
                                         break 'running;
                                     }
                                 }
