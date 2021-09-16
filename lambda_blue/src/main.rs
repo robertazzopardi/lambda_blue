@@ -1,6 +1,5 @@
-use std::env;
 use std::process::Command;
-use std::str::FromStr;
+use window::Win;
 
 pub const EMULATOR_CHIP_8_NAME: &str = "CHIP 8";
 
@@ -31,21 +30,8 @@ mod text_font {
         };
     }
 
-    pub fn generate_texture(
-        texture_creator: &'static TextureCreator<WindowContext>,
-        font: Font,
-        text: &str,
-    ) -> Texture<'static> {
-        let surface = font
-            .render(text)
-            .blended(Color::WHITE)
-            .map_err(|e| e.to_string())
-            .unwrap();
-
-        texture_creator
-            .create_texture_from_surface(&surface)
-            .map_err(|e| e.to_string())
-            .unwrap()
+    pub struct FontTexture<'a> {
+        font: Font<'a, 'a>,
     }
 
     pub struct Text<'a> {
@@ -100,17 +86,25 @@ mod text_font {
 }
 
 mod emulator {
+    use sdl2::filesystem;
     use serde::{Deserialize, Serialize};
     use std::{fs, thread};
 
+    use crate::file_system;
+
     #[derive(Serialize, Deserialize, Debug)]
     pub struct Rom {
-        pub name: String,
+        name: String,
     }
 
     impl Rom {
         pub fn new(name: String) -> Self {
             Self { name }
+        }
+
+        /// Get a reference to the rom's name.
+        pub fn name(&self) -> &str {
+            self.name.as_str()
         }
     }
 
@@ -119,13 +113,13 @@ mod emulator {
         pub emulators: Vec<Emulator>,
     }
 
-    impl Emulators {
-        fn default() -> Self {
-            Emulators {
-                emulators: Vec::new(),
-            }
+    impl Drop for Emulators {
+        fn drop(&mut self) {
+            self.save_emulators()
         }
+    }
 
+    impl Emulators {
         pub fn from_strings(place_holders: Vec<&str>) -> Self {
             Emulators {
                 emulators: place_holders
@@ -135,17 +129,20 @@ mod emulator {
             }
         }
 
-        pub fn save_emulators(self) {
+        pub fn save_emulators(&mut self) {
             let json_string = serde_json::to_string(&self.emulators).unwrap();
 
-            thread::spawn(|| {
-                fs::write("./emulators.txt", json_string);
+            let save_path = file_system::append_to_exec_dir("emulators.txt");
+
+            let save_thread = thread::spawn(|| {
+                fs::write(save_path, json_string).expect("Could not save emulator configuration!");
             });
+
+            save_thread.join().expect("Thread error")
         }
 
         pub fn load_emulators() -> Result<Emulators, String> {
             let read_emulators = fs::read_to_string("./emulators.txt");
-            // .expect("Could not find emulators.txt");
 
             if let Ok(read_emulators) = read_emulators {
                 if let Ok(emulators) = serde_json::from_str(&read_emulators) {
@@ -167,14 +164,6 @@ mod emulator {
     }
 
     impl Emulator {
-        pub fn default() -> Self {
-            Self {
-                name: String::new(),
-                roms: Vec::new(),
-                loaded_rom: None,
-            }
-        }
-
         pub fn new(name: String) -> Self {
             Self {
                 name,
@@ -187,13 +176,26 @@ mod emulator {
 
 mod file_system {
     use native_dialog::FileDialog;
+    use std::{env, path::PathBuf};
 
-    pub fn choose_file() -> Result<String, String> {
-        let home_dir = home::home_dir().unwrap();
+    pub fn get_execution_dir() -> PathBuf {
+        let mut path_buf = env::current_exe().unwrap();
+        path_buf.pop();
 
+        path_buf
+    }
+
+    pub fn append_to_exec_dir(to_append: &str) -> PathBuf {
+        let mut new_path = get_execution_dir();
+        new_path.push(to_append);
+
+        new_path
+    }
+
+    pub fn choose_file_dialog() -> Result<String, String> {
         let file_dialog = FileDialog::new();
         let path = file_dialog
-            .set_location(home_dir.to_str().unwrap())
+            .set_location(home::home_dir().unwrap().to_str().unwrap())
             .show_open_single_file()
             .unwrap();
 
@@ -278,7 +280,6 @@ mod window {
 
             let canvas = window
                 .into_canvas()
-                // .present_vsync()
                 .accelerated()
                 .build()
                 .map_err(|e| e.to_string())
@@ -297,13 +298,11 @@ mod window {
         }
 
         pub fn main_window(&mut self) -> Result<Option<Emulator>, String> {
-            let texture_creator = self.canvas.texture_creator();
             // Load a font
             let font: Font = self
                 .ttf_context
                 .load_font("lambda_blue/fonts/open-sans/OpenSans-ExtraBold.ttf", 56)?;
 
-            //
             let loaded_emulators = Emulators::load_emulators();
 
             let loaded_emulators = match loaded_emulators {
@@ -311,15 +310,11 @@ mod window {
                 Err(_) => Emulators::from_strings(vec!["Load Rom", "Back"]),
             };
 
-            println!("{:?}", loaded_emulators);
-
-            //
-
-            let emulator_names: Vec<Text> = text_list!(font, texture_creator, EMULATORS);
+            let emulator_names: Vec<Text> = text_list!(font, self.texture_creator, EMULATORS);
 
             let no_roms_text_vec: Vec<Text> = text_list!(
                 font,
-                texture_creator,
+                self.texture_creator,
                 loaded_emulators
                     .emulators
                     .iter()
@@ -356,13 +351,13 @@ mod window {
                                             self.running = false;
                                         } else {
                                             emulator = name.text().to_string().clone();
-                                        }
 
-                                        let mut text_to_render = &no_roms_text_vec;
-                                        if let Some(names) = &rom_names {
-                                            text_to_render = names;
+                                            let mut text_to_render = &no_roms_text_vec;
+                                            if let Some(names) = &rom_names {
+                                                text_to_render = names;
+                                            }
+                                            render_text_list!(text_to_render, self.canvas);
                                         }
-                                        render_text_list!(text_to_render, self.canvas);
                                     }
                                 }
                             } else {
@@ -376,7 +371,7 @@ mod window {
                                             break;
                                         }
 
-                                        if let Ok(file_name) = file_system::choose_file() {
+                                        if let Ok(file_name) = file_system::choose_file_dialog() {
                                             rom = file_name;
                                             self.running = false;
                                         }
@@ -428,29 +423,33 @@ mod window {
     }
 }
 
+fn start_emulator(path: &str, rom: &str) {
+    Command::new(path)
+        .arg(rom)
+        .output()
+        .expect("Could not run the chip 8 emulator");
+}
+
 fn main() -> Result<(), String> {
-    let mut path_buf = env::current_exe().unwrap();
-    path_buf.pop();
-    let executable_path = String::from_str(path_buf.as_path().to_str().unwrap()).unwrap();
+    // let file_utility = file_system::FileUtility::new();
 
     'running: loop {
-        let s = window::Win::new().main_window();
-        if let Ok(res) = s {
-            match res {
-                Some(emulator) => {
-                    if emulator.name == EMULATOR_CHIP_8_NAME {
-                        let emulator_path = executable_path.clone() + "/emulator_chip8";
+        let loaded_emulator = Win::new().main_window().unwrap();
+        match loaded_emulator {
+            Some(emulator) => {
+                if emulator.name == EMULATOR_CHIP_8_NAME {
+                    // let emulator_path = executable_path.clone() + "/emulator_chip8";
+                    let emulator_path = file_system::append_to_exec_dir("emulator_chip8");
 
-                        Command::new(emulator_path)
-                            .arg(emulator.loaded_rom.unwrap().name.as_str())
-                            .output()
-                            .expect("Could not run the chip 8 emulator");
-                    } else if emulator.name == EXIT_TEXT {
-                        break 'running;
-                    }
+                    start_emulator(
+                        emulator_path.to_str().unwrap(),
+                        emulator.loaded_rom.unwrap().name(),
+                    );
+                } else if emulator.name == EXIT_TEXT {
+                    break 'running;
                 }
-                None => break 'running,
             }
+            None => break 'running,
         }
     }
 
