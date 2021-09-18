@@ -1,10 +1,11 @@
+use emulator::LoadedEmulator;
 use std::process::Command;
 use window::Win;
 
-pub const EMULATOR_CHIP_8_NAME: &str = "CHIP 8";
+const EMULATOR_CHIP_8_NAME: &str = "emulator_chip8";
 
 const EXIT_TEXT: &str = "Exit";
-const EMULATORS: [&str; 2] = [EMULATOR_CHIP_8_NAME, EXIT_TEXT];
+const EMULATORS: [&str; 1] = [EMULATOR_CHIP_8_NAME];
 // const COUNT: usize = EMULATORS.len();
 
 #[macro_use]
@@ -14,24 +15,57 @@ mod text_font {
         pixels::Color,
         rect::Rect,
         render::{Texture, TextureCreator, TextureQuery},
+        surface::Surface,
         ttf::Font,
         video::WindowContext,
     };
 
-    macro_rules! text_list {
-        ($font:expr, $texture_creator:expr, $names:expr) => {
-            $names
-                .iter()
-                .enumerate()
-                .map(|(index, name)| {
-                    Text::new(*name, &$font, &$texture_creator, 0, (index * 80) as u32).unwrap()
-                })
-                .collect()
-        };
+    // macro_rules! generate_text_list {
+    //     ($font:expr, $texture_creator:expr, $names:expr) => {
+    //         $names
+    //             .iter()
+    //             .enumerate()
+    //             .map(|(index, name)| {
+    //                 Text::new(name, &$font, &$texture_creator, 0, (index * 80) as u32).unwrap()
+    //             })
+    //             .collect()
+    //     };
+    // }
+
+    pub fn generate_text_list<'a>(
+        font: &Font,
+        texture_creator: &'a TextureCreator<WindowContext>,
+        names: &[&'a str],
+    ) -> Vec<Text<'a>> {
+        names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| {
+                Text::new(name, font, &texture_creator, 0, (index * 80) as u32).unwrap()
+            })
+            .collect()
     }
 
-    pub struct FontTexture<'a> {
-        font: Font<'a, 'a>,
+    pub fn get_text_surface<'a>(text: &'a str, font: &Font) -> Surface<'a> {
+        font.render(text)
+            .blended(Color::WHITE)
+            .map_err(|e| e.to_string())
+            .unwrap()
+    }
+
+    pub fn generate_texture<'a>(
+        surface: &Surface,
+        texture_creator: &'a TextureCreator<WindowContext>,
+    ) -> Texture<'a> {
+        texture_creator
+            .create_texture_from_surface(surface)
+            .map_err(|e| e.to_string())
+            .unwrap()
+    }
+
+    pub fn create_target_for_texture(texture: &Texture, x: u32, y: u32) -> Rect {
+        let TextureQuery { width, height, .. } = texture.query();
+        get_centered_rect(width, height, x, y)
     }
 
     pub struct Text<'a> {
@@ -49,14 +83,9 @@ mod text_font {
             x: u32,
             y: u32,
         ) -> Result<Text<'a>, String> {
-            let surface = font
-                .render(text)
-                .blended(Color::WHITE)
-                .map_err(|e| e.to_string())?;
+            let surface = get_text_surface(text, font);
 
-            let texture = texture_creator
-                .create_texture_from_surface(&surface)
-                .map_err(|e| e.to_string())?;
+            let texture = generate_texture(&surface, texture_creator);
 
             let TextureQuery { width, height, .. } = texture.query();
 
@@ -86,13 +115,16 @@ mod text_font {
 }
 
 mod emulator {
-    use sdl2::filesystem;
+    use crate::{file_system, EXIT_TEXT};
     use serde::{Deserialize, Serialize};
     use std::{fs, thread};
 
-    use crate::file_system;
+    pub enum LoadedEmulator {
+        YES(Emulator),
+        NO,
+    }
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
     pub struct Rom {
         name: String,
     }
@@ -108,16 +140,16 @@ mod emulator {
         }
     }
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct Emulators {
         pub emulators: Vec<Emulator>,
     }
 
-    impl Drop for Emulators {
-        fn drop(&mut self) {
-            self.save_emulators()
-        }
-    }
+    // impl Drop for Emulators {
+    //     fn drop(&mut self) {
+    //         self.save_emulators()
+    //     }
+    // }
 
     impl Emulators {
         pub fn from_strings(place_holders: Vec<&str>) -> Self {
@@ -129,38 +161,93 @@ mod emulator {
             }
         }
 
-        pub fn save_emulators(&mut self) {
-            let json_string = serde_json::to_string(&self.emulators).unwrap();
+        // pub fn save_emulators(&self) {
+        //     #[cfg(debug_assertions)]
+        //     let json_string = serde_json::to_string_pretty(&self.emulators).unwrap();
 
-            let save_path = file_system::append_to_exec_dir("emulators.txt");
+        //     #[cfg(not(debug_assertions))]
+        //     let json_string = serde_json::to_string(&self.emulators).unwrap();
 
-            let save_thread = thread::spawn(|| {
-                fs::write(save_path, json_string).expect("Could not save emulator configuration!");
-            });
+        //     let save_path = file_system::append_to_exec_dir("emulators.json");
 
-            save_thread.join().expect("Thread error")
+        //     let save_thread = thread::spawn(|| {
+        //         fs::write(save_path, json_string).expect("Could not save emulator configuration!");
+        //     });
+
+        //     save_thread.join().expect("Thread error")
+        // }
+
+        // pub fn load_emulators() -> Result<Emulators, String> {
+        //     let load_path = file_system::append_to_exec_dir("emulators.json");
+
+        //     let read_emulators = fs::read_to_string(load_path);
+
+        //     if let Ok(read_emulators) = read_emulators {
+        //         if read_emulators.is_empty() {
+        //             return Err("Emulator file empty".to_string());
+        //         }
+
+        //         let data: Vec<Emulator> = serde_json::from_str(&read_emulators).unwrap();
+
+        //         Ok(Emulators { emulators: data })
+        //     } else {
+        //         Err("Could not read emulator file".to_string())
+        //     }
+        // }
+
+        // pub fn load_emulators_roms_clone(&mut self, index: usize) -> Vec<Rom> {
+        //     self.emulators[index].roms.clone()
+        // }
+
+        pub fn index_of_emulator(&self, emulator: &String) -> usize {
+            self.emulators
+                .iter()
+                .position(|emu| emu.name == *emulator)
+                .unwrap()
         }
 
-        pub fn load_emulators() -> Result<Emulators, String> {
-            let read_emulators = fs::read_to_string("./emulators.txt");
+        pub fn load_roms_for_emulator(&self, index: usize) -> Vec<&str> {
+            // self.emulators[index].roms
+            self.emulators[index]
+                .roms()
+                .iter()
+                .map(|r| r.name())
+                .collect::<Vec<&str>>()
+        }
 
-            if let Ok(read_emulators) = read_emulators {
-                if let Ok(emulators) = serde_json::from_str(&read_emulators) {
-                    emulators
-                } else {
-                    Err("Could not deserialise emulators.txt".to_string())
-                }
-            } else {
-                Err("Could not read emulator file".to_string())
-            }
+        pub fn load_rom_into_emulator(&mut self, rom: Rom, index: usize) {
+            self.emulators[index].load_rom(rom)
+        }
+
+        pub fn get_emulator_clone(&self, index: usize) -> Emulator {
+            self.emulators[index].clone()
+        }
+
+        /// Get a reference to the emulators's emulators.
+        pub fn emulators(&self) -> &[Emulator] {
+            self.emulators.as_slice()
+        }
+
+        pub fn emulator_names_to_string(&self) -> Vec<&str> {
+            let mut main_page_texts = self
+                .emulators
+                .iter()
+                .map(|emus| emus.name())
+                .collect::<Vec<&str>>();
+
+            main_page_texts.push(EXIT_TEXT);
+
+            main_page_texts
         }
     }
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct Emulator {
-        pub name: String,
+        name: String,
         roms: Vec<Rom>,
-        pub loaded_rom: Option<Rom>,
+
+        #[serde(skip_serializing, skip_deserializing)]
+        loaded_rom: Option<Rom>,
     }
 
     impl Emulator {
@@ -171,12 +258,44 @@ mod emulator {
                 loaded_rom: None,
             }
         }
+
+        pub fn load_rom(&mut self, rom: Rom) {
+            if !self.roms.contains(&rom) {
+                self.roms.push(rom.clone());
+            }
+
+            self.loaded_rom = Some(rom)
+        }
+
+        /// Get a reference to the emulator's loaded rom.
+        pub const fn loaded_rom(&self) -> Option<&Rom> {
+            self.loaded_rom.as_ref()
+        }
+
+        /// Get a reference to the emulator's name.
+        pub fn name(&self) -> &str {
+            self.name.as_str()
+        }
+
+        /// Get a reference to the emulator's roms.
+        pub fn roms(&self) -> &[Rom] {
+            self.roms.as_slice()
+        }
+
+        pub fn roms_as_str(&self) -> Vec<&str> {
+            self.roms
+                .iter()
+                .map(|r| r.name.as_str())
+                .collect::<Vec<&str>>()
+        }
     }
 }
 
 mod file_system {
     use native_dialog::FileDialog;
-    use std::{env, path::PathBuf};
+    use std::{env, fs, path::PathBuf, thread};
+
+    use crate::emulator::{Emulator, Emulators};
 
     pub fn get_execution_dir() -> PathBuf {
         let mut path_buf = env::current_exe().unwrap();
@@ -206,15 +325,49 @@ mod file_system {
 
         Ok(path.to_str().unwrap().to_string().replace("file://", ""))
     }
+
+    pub fn save_emulators(emulators: &[Emulator]) {
+        #[cfg(debug_assertions)]
+        let json_string = serde_json::to_string_pretty(emulators).unwrap();
+
+        #[cfg(not(debug_assertions))]
+        let json_string = serde_json::to_string(emulators).unwrap();
+
+        let save_path = append_to_exec_dir("emulators.json");
+
+        let save_thread = thread::spawn(|| {
+            fs::write(save_path, json_string).expect("Could not save emulator configuration!");
+        });
+
+        save_thread.join().expect("Thread error")
+    }
+
+    pub fn load_emulators() -> Result<Emulators, String> {
+        let load_path = append_to_exec_dir("emulators.json");
+
+        let read_emulators = fs::read_to_string(load_path);
+
+        if let Ok(read_emulators) = read_emulators {
+            if read_emulators.is_empty() {
+                return Err("Emulator file empty".to_string());
+            }
+
+            let data: Vec<Emulator> = serde_json::from_str(&read_emulators).unwrap();
+
+            Ok(Emulators { emulators: data })
+        } else {
+            Err("Could not read emulator file".to_string())
+        }
+    }
 }
 
 mod window {
     extern crate sdl2;
 
     use crate::{
-        emulator::{Emulator, Emulators, Rom},
+        emulator::{Emulators, LoadedEmulator, Rom},
         file_system,
-        text_font::Text,
+        text_font::{self, Text},
         EMULATORS, EXIT_TEXT,
     };
     use sdl2::{
@@ -222,7 +375,6 @@ mod window {
         keyboard::Keycode,
         rect::{Point, Rect},
         render::{Canvas, TextureCreator},
-        ttf::{Font, Sdl2TtfContext},
         video::{Window, WindowContext},
         EventPump, TimerSubsystem,
     };
@@ -237,35 +389,28 @@ mod window {
         )
     );
 
-    macro_rules! draw_text_list {
-        ($list:expr, $canvas:expr) => {
-            for text in $list.iter() {
-                $canvas.copy(&text.texture(), None, Some(text.target()))?;
-            }
-        };
-    }
-
     macro_rules! render_text_list {
-        ( $list:expr,$canvas:expr) => {
+        ($list:expr, $canvas:expr) => {
             $canvas.clear();
-            draw_text_list!($list, $canvas);
+            for text in $list.iter() {
+                $canvas
+                    .copy(&text.texture(), None, Some(text.target()))
+                    .unwrap();
+            }
             $canvas.present();
         };
     }
 
     pub struct Win {
         texture_creator: TextureCreator<WindowContext>,
-        ttf_context: Sdl2TtfContext,
         events: EventPump,
         timer: TimerSubsystem,
         canvas: Canvas<Window>,
-        running: bool,
     }
 
     impl Win {
         pub fn new() -> Self {
             let sdl_context = sdl2::init().unwrap();
-            let ttf_context = sdl2::ttf::init().map_err(|e| e.to_string()).unwrap();
             let events = sdl_context.event_pump().unwrap();
             let timer = sdl_context.timer().unwrap();
 
@@ -289,47 +434,61 @@ mod window {
 
             Self {
                 texture_creator,
-                ttf_context,
                 events,
                 timer,
                 canvas,
-                running: true,
             }
         }
 
-        pub fn main_window(&mut self) -> Result<Option<Emulator>, String> {
+        // pub fn render_texts(&mut self, texts_to_draw: Vec<Text>) {
+        //     self.canvas.clear();
+
+        //     for text in texts_to_draw.iter() {
+        //         self.canvas
+        //             .copy(&text.texture(), None, Some(text.target()))
+        //             .unwrap();
+        //     }
+
+        //     self.canvas.present();
+        // }
+
+        // pub fn present_emulators(&mut self, font: &Font, emulators: &Emulators) {
+        //     self.canvas.clear();
+
+        //     for (index, emulator) in emulators.emulators().iter().enumerate() {
+        //         let surface = text_font::get_text_surface(emulator.name(), font);
+        //         let texture = &text_font::generate_texture(&surface, &self.texture_creator);
+        //         let target = text_font::create_target_for_texture(texture, 0, (index * 80) as u32);
+
+        //         self.canvas.copy(texture, None, target).unwrap();
+        //     }
+
+        //     self.canvas.present();
+        // }
+
+        pub fn main_window(&mut self) -> LoadedEmulator {
+            let ttf_context = sdl2::ttf::init().map_err(|e| e.to_string()).unwrap();
             // Load a font
-            let font: Font = self
-                .ttf_context
-                .load_font("lambda_blue/fonts/open-sans/OpenSans-ExtraBold.ttf", 56)?;
+            let font = ttf_context
+                .load_font("lambda_blue/fonts/open-sans/OpenSans-ExtraBold.ttf", 56)
+                .unwrap();
 
-            let loaded_emulators = Emulators::load_emulators();
-
-            let loaded_emulators = match loaded_emulators {
+            let loaded_emulators_for_roms = match file_system::load_emulators() {
                 Ok(result) => result,
-                Err(_) => Emulators::from_strings(vec!["Load Rom", "Back"]),
+                Err(_) => Emulators::from_strings(EMULATORS.to_vec()),
             };
 
-            let emulator_names: Vec<Text> = text_list!(font, self.texture_creator, EMULATORS);
-
-            let no_roms_text_vec: Vec<Text> = text_list!(
-                font,
-                self.texture_creator,
-                loaded_emulators
-                    .emulators
-                    .iter()
-                    .map(|e| e.name.as_str())
-                    .collect::<Vec<&str>>()
+            let mut texts_to_draw: Vec<Text> = text_font::generate_text_list(
+                &font,
+                &self.texture_creator,
+                &loaded_emulators_for_roms
+                    .emulator_names_to_string()
+                    .as_slice(),
             );
 
-            let rom_names: Option<Vec<Text>> = None;
+            render_text_list!(texts_to_draw, self.canvas);
 
-            let mut emulator = String::new();
-            let mut rom = String::new();
-
-            render_text_list!(emulator_names, self.canvas);
-
-            while self.running {
+            'running: loop {
                 let start = self.timer.performance_counter();
 
                 for event in self.events.poll_iter() {
@@ -338,42 +497,83 @@ mod window {
                         | Event::KeyDown {
                             keycode: Some(Keycode::Escape),
                             ..
-                        } => self.running = false,
+                        } => break 'running,
                         Event::MouseButtonUp { x, y, .. } => {
                             let mouse_pos = Point::new(x, y);
 
-                            if emulator.is_empty() {
-                                for name in emulator_names.iter() {
-                                    if name.target().contains_point(mouse_pos) {
-                                        // println!("{}", name.text());
+                            for i in 0..texts_to_draw.len() {
+                                if texts_to_draw[i].target().contains_point(mouse_pos) {
+                                    match texts_to_draw[i].text() {
+                                        EXIT_TEXT => {
+                                            return LoadedEmulator::NO;
+                                        }
+                                        "Back" => {
+                                            texts_to_draw = text_font::generate_text_list(
+                                                &font,
+                                                &self.texture_creator,
+                                                &loaded_emulators_for_roms
+                                                    .emulator_names_to_string()
+                                                    .as_slice(),
+                                            );
 
-                                        if name.text() == EXIT_TEXT {
-                                            self.running = false;
-                                        } else {
-                                            emulator = name.text().to_string().clone();
+                                            render_text_list!(texts_to_draw, self.canvas);
+                                        }
+                                        "Load Rom" => {
+                                            let choose_file_dialog =
+                                                file_system::choose_file_dialog();
 
-                                            let mut text_to_render = &no_roms_text_vec;
-                                            if let Some(names) = &rom_names {
-                                                text_to_render = names;
+                                            if let Ok(rom_file_name) = choose_file_dialog {
+                                                let mut to_save = loaded_emulators_for_roms.clone();
+
+                                                to_save.load_rom_into_emulator(
+                                                    Rom::new(rom_file_name),
+                                                    i,
+                                                );
+
+                                                file_system::save_emulators(to_save.emulators());
+
+                                                return LoadedEmulator::YES(
+                                                    to_save.get_emulator_clone(i),
+                                                );
                                             }
-                                            render_text_list!(text_to_render, self.canvas);
                                         }
-                                    }
-                                }
-                            } else {
-                                for name in no_roms_text_vec.iter() {
-                                    if name.target().contains_point(mouse_pos) {
-                                        // println!("{} {:?}", name.text(), home::home_dir());
+                                        _ => {
+                                            if loaded_emulators_for_roms
+                                                .load_roms_for_emulator(i)
+                                                .is_empty()
+                                            {
+                                                texts_to_draw = text_font::generate_text_list(
+                                                    &font,
+                                                    &self.texture_creator,
+                                                    &vec!["Load Rom", "Back"],
+                                                );
+                                            } else if loaded_emulators_for_roms
+                                                .get_emulator_clone(i)
+                                                .roms_as_str()
+                                                .contains(&texts_to_draw[i].text())
+                                            {
+                                                let mut ret_emulator =
+                                                    loaded_emulators_for_roms.get_emulator_clone(i);
 
-                                        if name.text() == "Back" {
-                                            emulator = String::new();
-                                            render_text_list!(emulator_names, self.canvas);
-                                            break;
-                                        }
+                                                ret_emulator.load_rom(Rom::new(
+                                                    texts_to_draw[i].text().to_string(),
+                                                ));
 
-                                        if let Ok(file_name) = file_system::choose_file_dialog() {
-                                            rom = file_name;
-                                            self.running = false;
+                                                return LoadedEmulator::YES(ret_emulator);
+                                            } else {
+                                                let mut z = loaded_emulators_for_roms
+                                                    .load_roms_for_emulator(i);
+
+                                                z.append(&mut vec!["Load Rom", "Back"]);
+
+                                                texts_to_draw = text_font::generate_text_list(
+                                                    &font,
+                                                    &self.texture_creator,
+                                                    &z,
+                                                );
+                                            }
+
+                                            render_text_list!(texts_to_draw, self.canvas);
                                         }
                                     }
                                 }
@@ -390,14 +590,7 @@ mod window {
                 self.timer.delay(((1000. / 10.) - elapsed).floor() as u32);
             }
 
-            if !emulator.is_empty() && !rom.is_empty() {
-                let mut em = Emulator::new(emulator);
-                em.loaded_rom = Some(Rom::new(rom));
-
-                return Ok(Some(em));
-            }
-
-            Ok(None)
+            LoadedEmulator::NO
         }
     }
 
@@ -423,7 +616,7 @@ mod window {
     }
 }
 
-fn start_emulator(path: &str, rom: &str) {
+fn start_emulator_process(path: &str, rom: &str) {
     Command::new(path)
         .arg(rom)
         .output()
@@ -431,25 +624,22 @@ fn start_emulator(path: &str, rom: &str) {
 }
 
 fn main() -> Result<(), String> {
-    // let file_utility = file_system::FileUtility::new();
-
     'running: loop {
-        let loaded_emulator = Win::new().main_window().unwrap();
+        let loaded_emulator = Win::new().main_window();
         match loaded_emulator {
-            Some(emulator) => {
-                if emulator.name == EMULATOR_CHIP_8_NAME {
-                    // let emulator_path = executable_path.clone() + "/emulator_chip8";
-                    let emulator_path = file_system::append_to_exec_dir("emulator_chip8");
+            LoadedEmulator::YES(emulator) => {
+                if EMULATORS.contains(&emulator.name()) {
+                    let emulator_path = file_system::append_to_exec_dir(emulator.name());
 
-                    start_emulator(
+                    start_emulator_process(
                         emulator_path.to_str().unwrap(),
-                        emulator.loaded_rom.unwrap().name(),
+                        emulator.loaded_rom().unwrap().name(),
                     );
-                } else if emulator.name == EXIT_TEXT {
+                } else if emulator.name() == EXIT_TEXT {
                     break 'running;
                 }
             }
-            None => break 'running,
+            LoadedEmulator::NO => break 'running,
         }
     }
 
