@@ -24,10 +24,14 @@ impl Rom {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Emulators {
-    pub emulators: Vec<Emulator>,
+    emulators: Vec<Emulator>,
 }
 
 impl Emulators {
+    pub fn new_from_vec(emulators: Vec<Emulator>) -> Self {
+        Self { emulators }
+    }
+
     pub fn from_strings(place_holders: Vec<&str>) -> Self {
         Emulators {
             emulators: place_holders
@@ -69,9 +73,13 @@ impl Emulators {
 
         main_page_texts
     }
+
+    pub fn emulator_index(&self, emulator: &Emulator) -> usize {
+        self.emulators.iter().position(|em| em == emulator).unwrap()
+    }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Emulator {
     name: String,
     roms: Vec<Rom>,

@@ -60,7 +60,7 @@ pub fn load_emulators() -> Result<Emulators, String> {
 
         let data: Vec<Emulator> = serde_json::from_str(&read_emulators).unwrap();
 
-        Ok(Emulators { emulators: data })
+        Ok(Emulators::new_from_vec(data))
     } else {
         Err("Could not read emulator file".to_string())
     }

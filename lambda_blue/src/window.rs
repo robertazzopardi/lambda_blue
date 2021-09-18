@@ -1,7 +1,7 @@
 extern crate sdl2;
 
 use crate::{
-    emulator::{Emulators, LoadedEmulator, Rom},
+    emulator::{Emulator, Emulators, LoadedEmulator, Rom},
     file_system,
     text_font::{self, Text},
     EMULATORS, EXIT_TEXT,
@@ -102,6 +102,8 @@ impl Win {
 
         render_text_list!(texts_to_draw, self.canvas);
 
+        let mut viewing_emulator: Option<&Emulator> = None;
+
         'running: loop {
             let start = self.timer.performance_counter();
 
@@ -138,40 +140,51 @@ impl Win {
                                         if let Ok(rom_file_name) = choose_file_dialog {
                                             let mut to_save = loaded_emulators_for_roms.clone();
 
-                                            to_save
-                                                .load_rom_into_emulator(Rom::new(rom_file_name), i);
+                                            if let Some(viewd_emulator) = viewing_emulator {
+                                                let emulator_index = loaded_emulators_for_roms
+                                                    .emulator_index(viewd_emulator);
 
-                                            file_system::save_emulators(to_save.emulators());
+                                                to_save.load_rom_into_emulator(
+                                                    Rom::new(rom_file_name),
+                                                    emulator_index,
+                                                );
 
-                                            return LoadedEmulator::Yes(
-                                                to_save.get_emulator_clone(i),
-                                            );
+                                                file_system::save_emulators(to_save.emulators());
+
+                                                return LoadedEmulator::Yes(
+                                                    to_save.get_emulator_clone(emulator_index),
+                                                );
+                                            }
                                         }
                                     }
                                     _ => {
-                                        if loaded_emulators_for_roms
-                                            .load_roms_for_emulator(i)
-                                            .is_empty()
-                                        {
-                                            texts_to_draw = text_font::generate_text_list(
-                                                &font,
-                                                &self.texture_creator,
-                                                &["Load Rom", "Back"],
-                                            );
-                                        } else if loaded_emulators_for_roms
-                                            .get_emulator_clone(i)
-                                            .roms_as_str()
-                                            .contains(&texts_to_draw[i].text())
-                                        {
-                                            let mut ret_emulator =
-                                                loaded_emulators_for_roms.get_emulator_clone(i);
+                                        let mut can_load = false;
+                                        if let Some(em) = viewing_emulator {
+                                            if em.roms_as_str().contains(&texts_to_draw[i].text()) {
+                                                can_load = true;
+                                            }
+                                        }
 
-                                            ret_emulator.load_rom(Rom::new(
-                                                texts_to_draw[i].text().to_string(),
-                                            ));
+                                        if can_load {
+                                            let ret_emulator = match viewing_emulator {
+                                                Some(viewed_emulator) => {
+                                                    let mut mm = viewed_emulator.clone();
+                                                    mm.load_rom(Rom::new(
+                                                        texts_to_draw[i].text().to_string(),
+                                                    ));
+                                                    mm
+                                                }
+                                                None => todo!(),
+                                            };
 
                                             return LoadedEmulator::Yes(ret_emulator);
                                         } else {
+                                            viewing_emulator =
+                                                Some(&loaded_emulators_for_roms.emulators()[i]);
+
+                                            // println!("{:?}", viewing_emulator);
+
+                                            // Display emulators roms
                                             let mut z =
                                                 loaded_emulators_for_roms.load_roms_for_emulator(i);
 
