@@ -1,5 +1,5 @@
 use native_dialog::FileDialog;
-use std::{env, fs, path::PathBuf, thread};
+use std::{env, fs, path::PathBuf, str::FromStr, thread};
 
 use crate::emulator::{Emulator, Emulators};
 
@@ -17,7 +17,7 @@ pub fn append_to_exec_dir(to_append: &str) -> PathBuf {
     new_path
 }
 
-pub fn choose_file_dialog() -> Result<String, String> {
+pub fn choose_file_dialog() -> Result<PathBuf, String> {
     let file_dialog = FileDialog::new();
     let path = file_dialog
         .set_location(home::home_dir().unwrap().to_str().unwrap())
@@ -29,7 +29,14 @@ pub fn choose_file_dialog() -> Result<String, String> {
         None => return Err("Something went wrong choosing a rom file!".to_string()),
     };
 
-    Ok(path.to_str().unwrap().to_string().replace("file://", ""))
+    Ok(PathBuf::from_str(
+        path.to_str()
+            .unwrap()
+            .to_string()
+            .replace("file://", "")
+            .as_str(),
+    )
+    .unwrap())
 }
 
 pub fn save_emulators(emulators: &[Emulator]) {

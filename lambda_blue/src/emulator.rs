@@ -1,5 +1,9 @@
-use crate::EXIT_TEXT;
+use crate::{file_system, EXIT_TEXT};
 use serde::{Deserialize, Serialize};
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 pub enum LoadedEmulator {
     Yes(Emulator),
@@ -9,16 +13,19 @@ pub enum LoadedEmulator {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Rom {
     name: String,
+    path: PathBuf,
 }
 
 impl Rom {
-    pub fn new(name: String) -> Self {
-        Self { name }
+    pub fn new(path: &Path) -> Self {
+        Self {
+            name: path.file_stem().unwrap().to_str().unwrap().to_string(),
+            path: path.to_path_buf(),
+        }
     }
 
-    /// Get a reference to the rom's name.
-    pub fn name(&self) -> &str {
-        self.name.as_str()
+    pub fn get_path(&self) -> &PathBuf {
+        &self.path
     }
 }
 
@@ -36,18 +43,18 @@ impl Emulators {
         Emulators {
             emulators: place_holders
                 .iter()
-                .map(|s| Emulator::new(s.to_string()))
+                .map(|s| Emulator::new(PathBuf::from_str(s).unwrap()))
                 .collect(),
         }
     }
 
-    pub fn load_roms_for_emulator(&self, index: usize) -> Vec<&str> {
-        self.emulators[index]
-            .roms()
-            .iter()
-            .map(|r| r.name())
-            .collect::<Vec<&str>>()
-    }
+    // pub fn load_roms_for_emulator(&self, index: usize) -> Vec<&str> {
+    //     self.emulators[index]
+    //         .roms()
+    //         .iter()
+    //         .map(|r| r.name())
+    //         .collect::<Vec<&str>>()
+    // }
 
     pub fn load_rom_into_emulator(&mut self, rom: Rom, index: usize) {
         self.emulators[index].load_rom(rom)
@@ -82,6 +89,7 @@ impl Emulators {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Emulator {
     name: String,
+    path: PathBuf,
     roms: Vec<Rom>,
 
     #[serde(skip_serializing, skip_deserializing)]
@@ -89,9 +97,13 @@ pub struct Emulator {
 }
 
 impl Emulator {
-    pub fn new(name: String) -> Self {
+    pub fn new(path: PathBuf) -> Self {
+        let name = path.file_stem().unwrap().to_str().unwrap();
+        let emulator_path = file_system::append_to_exec_dir(name);
+
         Self {
-            name,
+            name: name.to_string(),
+            path: emulator_path,
             roms: Vec::new(),
             loaded_rom: None,
         }
@@ -105,9 +117,17 @@ impl Emulator {
         self.loaded_rom = Some(rom)
     }
 
-    /// Get a reference to the emulator's loaded rom.
-    pub const fn loaded_rom(&self) -> Option<&Rom> {
-        self.loaded_rom.as_ref()
+    pub fn get_rom_path(&self) -> &str {
+        self.loaded_rom
+            .as_ref()
+            .unwrap()
+            .get_path()
+            .to_str()
+            .unwrap()
+    }
+
+    pub fn get_path(&self) -> &str {
+        self.path.to_str().unwrap()
     }
 
     /// Get a reference to the emulator's name.
@@ -116,8 +136,12 @@ impl Emulator {
     }
 
     /// Get a reference to the emulator's roms.
-    pub fn roms(&self) -> &[Rom] {
-        self.roms.as_slice()
+    // pub fn roms(&self) -> &[Rom] {
+    //     self.roms.as_slice()
+    // }
+
+    pub fn rom_at_index(&self, index: usize) -> Rom {
+        self.roms[index].clone()
     }
 
     pub fn roms_as_str(&self) -> Vec<&str> {

@@ -135,9 +135,9 @@ impl Win {
                                         render_text_list!(texts_to_draw, self.canvas);
                                     }
                                     "Load Rom" => {
-                                        let choose_file_dialog = file_system::choose_file_dialog();
+                                        let chosen_file = file_system::choose_file_dialog();
 
-                                        if let Ok(rom_file_name) = choose_file_dialog {
+                                        if let Ok(rom_file_name) = chosen_file {
                                             let mut to_save = loaded_emulators_for_roms.clone();
 
                                             if let Some(viewd_emulator) = viewing_emulator {
@@ -145,7 +145,7 @@ impl Win {
                                                     .emulator_index(viewd_emulator);
 
                                                 to_save.load_rom_into_emulator(
-                                                    Rom::new(rom_file_name),
+                                                    Rom::new(&rom_file_name),
                                                     emulator_index,
                                                 );
 
@@ -169,9 +169,16 @@ impl Win {
                                             let ret_emulator = match viewing_emulator {
                                                 Some(viewed_emulator) => {
                                                     let mut mm = viewed_emulator.clone();
-                                                    mm.load_rom(Rom::new(
-                                                        texts_to_draw[i].text().to_string(),
-                                                    ));
+
+                                                    let index = mm
+                                                        .roms_as_str()
+                                                        .iter()
+                                                        .position(|rs| {
+                                                            rs == &texts_to_draw[i].text()
+                                                        })
+                                                        .unwrap();
+                                                    let rom = mm.rom_at_index(index);
+                                                    mm.load_rom(rom);
                                                     mm
                                                 }
                                                 None => todo!(),
@@ -179,14 +186,12 @@ impl Win {
 
                                             return LoadedEmulator::Yes(ret_emulator);
                                         } else {
+                                            // Display emulators roms
+
                                             viewing_emulator =
                                                 Some(&loaded_emulators_for_roms.emulators()[i]);
 
-                                            // println!("{:?}", viewing_emulator);
-
-                                            // Display emulators roms
-                                            let mut z =
-                                                loaded_emulators_for_roms.load_roms_for_emulator(i);
+                                            let mut z = viewing_emulator.unwrap().roms_as_str();
 
                                             z.append(&mut vec!["Load Rom", "Back"]);
 
